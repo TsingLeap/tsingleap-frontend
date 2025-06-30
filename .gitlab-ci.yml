@@ -1,0 +1,45 @@
+stages:
+  - build
+  - test
+  - deploy
+
+build-frontend:
+  stage: build
+  image: m.daocloud.io/docker.io/library/node:18
+  script:
+    - npm install
+    - npm run build
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 1 day
+
+unit-test:
+  stage: test
+  image: node:18
+  before_script:
+    - npm install
+    - npm run build
+    - npm run test  || true  
+    - SUFFIX=$RANDOM
+    - curl "http://api.spring25a.secoder.net/static/sonar-scanner.tar.gz" -s -o "/tmp/sonar-$SUFFIX.tar.gz"
+    - tar -xf "/tmp/sonar-$SUFFIX.tar.gz" -C /opt
+    - sed -i 's/sonarqube.secoder.net/sonarqube.spring25a.secoder.net/g' /opt/sonar-scanner/conf/sonar-scanner.properties
+    - sed -i 's/api.secoder.net/api.spring25a.secoder.net/g' /opt/sonar-scanner/bin/sonar-scanner
+  script:
+    - /opt/sonar-scanner/bin/sonar-scanner
+
+deploy-to-server:
+  stage: deploy
+  image: registry.spring25a.secoder.net/tool/deployer
+  dependencies:
+    - build-frontend
+  script:
+    - export BUILD_IMAGE_NAME=$CI_REGISTRY_IMAGE
+    - export BUILD_IMAGE_TAG=$CI_COMMIT_REF_SLUG
+    - export BUILD_IMAGE_USERNAME=$CI_REGISTRY_USER
+    - export BUILD_IMAGE_PASSWORD=$CI_REGISTRY_PASSWORD
+    - export API_SERVER=https://deployer.spring25a.secoder.net/api
+    - deployer build
+    - deployer dyno replace $CI_PROJECT_NAME "$CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG" "$REGISTRY_USER" "$REGISTRY_PWD"
+  when: on_success
